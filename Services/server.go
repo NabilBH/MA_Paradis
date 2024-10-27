@@ -2,7 +2,6 @@ package Services
 
 import (
 	"bufio"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -10,7 +9,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
-	"hes-so.ch/gnutella/helpers"
+	"hes-so.ch/gnutella/Collection"
 	"hes-so.ch/gnutella/model"
 	"hes-so.ch/gnutella/repository"
 )
@@ -21,9 +20,10 @@ type Server struct {
 	Logger             *log.Logger
 	Name               string
 	entrepotRepository repository.Entrepot
-	history            map[string][]string
-	nodeConfig         model.Node
-	initiatedRequests  map[string]bool
+	//thread Safe map of queues to handles multiple connections
+	history           *Collection.ConcurrentMapOfQueues
+	nodeConfig        model.Node
+	initiatedRequests map[string]bool
 }
 
 func (server *Server) SendQuery(query model.Query, destAddress string) {
@@ -74,45 +74,22 @@ func (server *Server) Start() {
 	server.Logger.Printf("INFO: %v starts listening on %v", server.Name, localAddress)
 	for {
 		conn, _ := ln.Accept()
-		defer conn.Close()
-		//Read incoming
-		var builder strings.Builder
-		reader := bufio.NewReader(conn)
-		for {
-			line, err := reader.ReadString('\n')
-			if err == io.EOF {
-				// End of data
-				break
-			}
-			if err != nil {
-				fmt.Printf("Error reading data: %v\n", err)
-				return
-			}
-			builder.WriteString(line)
-		}
-		message := builder.String()
-		server.HandleMessage(message)
+		//Handle concurrent connections
+		go server.HandleConnection(conn)
 	}
-
 }
 
-func (server *Server) HandleMessage(message string) {
-
-	var receivedQuery model.Query
-	err := yaml.Unmarshal([]byte(message), &receivedQuery)
-
-	if err != nil {
-		server.Logger.Fatalf("Fatal : %v Could not unmarshal received message Error:%v", server.Name, err)
-	}
+func (server *Server) HandleQuery(receivedQuery model.Query) {
 	// If query is a request for a movie
-	if receivedQuery.Type == 1 {
-		server.Logger.Printf("INFO: %v received a request from :%v (TTL : %v)", server.Name, receivedQuery.SourceAddress, receivedQuery.TTL)
-
-		if !helpers.InArray(receivedQuery.SourceAddress, server.history[receivedQuery.Id]) {
-			server.history[receivedQuery.Id] = append(
-				server.history[receivedQuery.Id],
-				receivedQuery.SourceAddress)
-		}
+	// Chekc that the request did not loopback to inital send
+	if receivedQuery.Type == 1 && !server.initiatedRequests[receivedQuery.Id] {
+		server.Logger.Printf(
+			"INFO: %v received a request from :%v (TTL : %v)",
+			server.Name,
+			receivedQuery.SourceAddress,
+			receivedQuery.TTL,
+		)
+		server.history.Enqueue(receivedQuery.Id, receivedQuery.SourceAddress)
 
 		//Search movie in entrepot
 		movies, err := server.entrepotRepository.FindMoviesByTitle(receivedQuery.Data)
@@ -134,25 +111,23 @@ func (server *Server) HandleMessage(message string) {
 			//send a response to the orignal sender
 			go server.SendQuery(response, receivedQuery.SourceAddress)
 		}
-
-		// decrement the ttl
-		forwardQuery := model.Query{
-			Id:            receivedQuery.Id,
-			TTL:           receivedQuery.TTL - 1,
-			Data:          receivedQuery.Data,
-			SourceAddress: server.nodeConfig.Address,
-			Type:          1,
-		}
 		// Forward request to all neighbors when TTL is not expired
-		if forwardQuery.TTL > 0 {
+		if receivedQuery.TTL-1 > 0 {
+			forwardQuery := model.Query{
+				Id:            receivedQuery.Id,
+				TTL:           receivedQuery.TTL - 1,
+				Data:          receivedQuery.Data,
+				SourceAddress: server.nodeConfig.Address,
+				Type:          1,
+			}
 			for _, neighbour := range server.nodeConfig.Neighbours {
 				//Exclude the original request source
 				if neighbour.Address != receivedQuery.SourceAddress {
 					go server.SendQuery(forwardQuery, neighbour.Address)
 				}
 			}
-		} else if receivedQuery.TTL == 0 {
-			server.Logger.Printf("ERROR: TTL expired for request id: %v at %v", server.Name, receivedQuery.Id)
+		} else {
+			server.Logger.Printf("Debug: TTL expired for request id: %v at %v", receivedQuery.Id, server.Name)
 		}
 
 		//the received query is a response from another node
@@ -167,27 +142,58 @@ func (server *Server) HandleMessage(message string) {
 				receivedQuery.Path)
 		} else {
 			receivedQuery.Path = server.Name + "-->" + receivedQuery.Path
-			for _, sender := range server.history[receivedQuery.Id] {
+			receivedQuery.SourceAddress = server.nodeConfig.Address
+			sender, ok := server.history.Dequeue(receivedQuery.Id)
+			if ok {
 				go server.SendQuery(receivedQuery, sender)
 			}
-			server.history[receivedQuery.Id] = []string{}
 		}
-
+	} else if server.initiatedRequests[receivedQuery.Id] {
+		server.Logger.Printf("Warning: Request id : %v loopback to original sender %v", receivedQuery.Id, server.Name)
 	}
 }
 
-func NewServer(name string, logger *log.Logger) *Server {
+func (server *Server) HandleConnection(conn net.Conn) {
+	defer conn.Close()
+	var builder strings.Builder
+
+	reader := bufio.NewReader(conn)
+	for {
+		line, err := reader.ReadString('\n')
+		if err == io.EOF {
+			// End of data
+			break
+		}
+		if err != nil {
+			server.Logger.Fatalf("Fatal: %v error while reading data: %v\n", server.Name, err)
+			return
+		}
+		builder.WriteString(line)
+	}
+	message := builder.String()
+
+	var receivedQuery model.Query
+	err := yaml.Unmarshal([]byte(message), &receivedQuery)
+
+	if err != nil {
+		server.Logger.Fatalf("Fatal : %v Could not unmarshal received message Error:%v", server.Name, err)
+	}
+	server.HandleQuery(receivedQuery)
+}
+
+func NewServer(name string, logger *log.Logger, maxConnections int) *Server {
 	nodeEntrepotPath := filepath.Join("./nodes", name, "entrepot.yaml")
 	nodeNeighborsPath := filepath.Join("./nodes", name, "/node.yaml")
 	nodeRepository := repository.Node{Path: nodeNeighborsPath}
 	nodeConfig, err := nodeRepository.GetNodeConfig()
+
 	if err != nil {
 		logger.Fatalf("FATAL : %v failed to load configuration%v", name, err)
 	}
 
 	return &Server{
 		Name:               name,
-		history:            make(map[string][]string),
+		history:            Collection.NewConcurrentMapOfQueues(maxConnections),
 		initiatedRequests:  make(map[string]bool),
 		nodeConfig:         nodeConfig,
 		entrepotRepository: repository.Entrepot{Path: nodeEntrepotPath},

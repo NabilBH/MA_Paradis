@@ -5,7 +5,7 @@
     - "genre2"
   path: "/drive/movies"
 
-- title: "Terminator"
+- title: "Batman"
   id: 3
   genres:
     - "genre1"

@@ -19,12 +19,14 @@ func main() {
 	// Initialize a logger instance
 	logger := log.New(file, "", log.Ldate|log.Ltime|log.Lshortfile)
 
+	//Used to handle parralele connections by the server
+	connectionSize := 5
 	// Init the each node
-	server1 := Services.NewServer("node-1", logger)
-	server2 := Services.NewServer("node-2", logger)
-	server3 := Services.NewServer("node-3", logger)
-	server4 := Services.NewServer("node-4", logger)
-	server5 := Services.NewServer("node-5", logger)
+	server1 := Services.NewServer("node-1", logger, connectionSize)
+	server2 := Services.NewServer("node-2", logger, connectionSize)
+	server3 := Services.NewServer("node-3", logger, connectionSize)
+	server4 := Services.NewServer("node-4", logger, connectionSize)
+	server5 := Services.NewServer("node-5", logger, connectionSize)
 
 	// each server will start listening
 	go server1.Start()
@@ -33,7 +35,7 @@ func main() {
 	go server4.Start()
 	time.Sleep(2 * time.Second) //Waiting all node to be ready
 
-	server5.InitiateQuery("Batman", 3)
+	server5.InitiateQuery("Batman", 5)
 	time.Sleep(2 * time.Second) //Waiting all console return from nodes
 	//fmt.Printf("Movies Found : %+v\n", movies)
 

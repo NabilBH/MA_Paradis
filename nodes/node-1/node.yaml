@@ -5,9 +5,9 @@ neighbours:
   #   address: "127.0.1.2"
   #   edge_weight: 0
   
-  - id: 4
-    address: "127.0.1.4"
-    edge_weight: 0
+  # - id: 4
+  #   address: "127.0.1.4"
+  #   edge_weight: 0
     
   - id: 3
     address: "127.0.1.3"
