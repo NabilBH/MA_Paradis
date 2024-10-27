@@ -1,11 +1,11 @@
 # Gnutella 
 
 ## Quickstart
-Install dependencies
+Installer les dependances
 ````
 go get
 ````
-Run the program
+Executer le programme
 ````
 go run ./main.go
 ```` 
@@ -59,7 +59,7 @@ Si message = requete (type = 1)
     Decremente le TTL 
     Si TTL > 0
       ajoute l'adresse local de n a message.Path 
-      pour chaque  voisins de nnon inclus dans message.Path // pour eviter les boucles
+      pour chaque  voisins de non inclus dans message.Path // pour eviter les boucles
         envoyer le message
 
 Sinon message = reponse (type = 0)
@@ -67,7 +67,7 @@ Sinon message = reponse (type = 0)
         le noeud actuel est la source original de la requete de recherche
     Sinon
      nextHop = l'adresse du noeud qui precede le noeud actuelle dans message.Path 
-     renvoyer la reponse a nextHop pour propager la reponses
+     renvoyer la reponse a nextHop pour propager la reponse
 
 ```
 Chaque serveur peut traiter plusieurs connection en parrallele grace a la goroutine HandleConnection()
