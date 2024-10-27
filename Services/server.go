@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
-	"hes-so.ch/gnutella/Collection"
 	"hes-so.ch/gnutella/model"
 	"hes-so.ch/gnutella/repository"
 )
@@ -20,10 +20,16 @@ type Server struct {
 	Logger             *log.Logger
 	Name               string
 	entrepotRepository repository.Entrepot
-	//thread Safe map of queues to handles multiple connections
-	history           *Collection.ConcurrentMapOfQueues
-	nodeConfig        model.Node
-	initiatedRequests map[string]bool
+	nodeConfig         model.Node
+}
+
+func contains(slice []string, elem string) bool {
+	for _, item := range slice {
+		if item == elem {
+			return true
+		}
+	}
+	return false
 }
 
 func (server *Server) SendQuery(query model.Query, destAddress string) {
@@ -47,12 +53,28 @@ func (server *Server) SendQuery(query model.Query, destAddress string) {
 	defer outConn.Close()
 }
 
+func (server *Server) NextHop(query model.Query) (string, bool) {
+	for i, node := range query.Path {
+		if server.nodeConfig.Address == node {
+			return query.Path[i-1], true
+		}
+	}
+	return "", false
+}
+
 func (server *Server) InitiateQuery(movieTitle string, ttl int) {
 	localAddress := server.nodeConfig.Address
+	newId := uuid.New().String()
 
-	query := model.Query{Id: "myUniqueId", TTL: ttl, Data: movieTitle, Type: 1, SourceAddress: localAddress}
+	query := model.Query{
+		Id:            newId,
+		TTL:           ttl,
+		Data:          movieTitle,
+		Type:          1,
+		SourceAddress: localAddress,
+		Path:          []string{localAddress}}
 	server.Logger.Printf("INFO: %v Searching for movie %v", server.Name, movieTitle)
-	server.initiatedRequests[query.Id] = true
+
 	for _, neighbour := range server.nodeConfig.Neighbours {
 		go server.SendQuery(query, neighbour.Address)
 	}
@@ -82,31 +104,31 @@ func (server *Server) Start() {
 func (server *Server) HandleQuery(receivedQuery model.Query) {
 	// If query is a request for a movie
 	// Chekc that the request did not loopback to inital send
-	if receivedQuery.Type == 1 && !server.initiatedRequests[receivedQuery.Id] {
+	if receivedQuery.Type == 1 {
 		server.Logger.Printf(
 			"INFO: %v received a request from :%v (TTL : %v)",
 			server.Name,
 			receivedQuery.SourceAddress,
 			receivedQuery.TTL,
 		)
-		server.history.Enqueue(receivedQuery.Id, receivedQuery.SourceAddress)
 
 		//Search movie in entrepot
 		movies, err := server.entrepotRepository.FindMoviesByTitle(receivedQuery.Data)
 		if err != nil {
 			server.Logger.Fatalf("Fatal : %v Could not fetch movies, Error:%v", server.Name, err)
 		}
-
+		newHop := append(receivedQuery.Path, server.nodeConfig.Address)
 		//Matching Movie found
 		if len(movies) > 0 {
 			server.Logger.Printf("INFO: %v has the requested movie", server.Name)
+
 			response := model.Query{
 				Id:            receivedQuery.Id,
 				TTL:           -1,
 				Data:          server.nodeConfig.Address, // Information about the node containing the movie
 				Type:          0,
 				SourceAddress: server.nodeConfig.Address,
-				Path:          server.Name,
+				Path:          newHop,
 			}
 			//send a response to the orignal sender
 			go server.SendQuery(response, receivedQuery.SourceAddress)
@@ -119,37 +141,37 @@ func (server *Server) HandleQuery(receivedQuery model.Query) {
 				Data:          receivedQuery.Data,
 				SourceAddress: server.nodeConfig.Address,
 				Type:          1,
+				Path:          newHop,
 			}
 			for _, neighbour := range server.nodeConfig.Neighbours {
 				//Exclude the original request source
-				if neighbour.Address != receivedQuery.SourceAddress {
-					go server.SendQuery(forwardQuery, neighbour.Address)
+				if contains(receivedQuery.Path, neighbour.Address) {
+					continue
 				}
+				go server.SendQuery(forwardQuery, neighbour.Address)
+
 			}
 		} else {
 			server.Logger.Printf("Debug: TTL expired for request id: %v at %v", receivedQuery.Id, server.Name)
 		}
-
 		//the received query is a response from another node
 	} else if receivedQuery.Type == 0 {
 		server.Logger.Printf("INFO: %v has received a response from %v", server.Name, receivedQuery.SourceAddress)
-		// if the node is the iniator stop sending bach the response
-		if server.initiatedRequests[receivedQuery.Id] {
+		// if the node is the iniator stop sending back the response
+		if receivedQuery.Path[0] == server.nodeConfig.Address {
 			server.Logger.Printf(
 				"SUCCESS: %v received response: node %v has the requested content with path %v \n",
 				server.Name,
 				receivedQuery.Data,
 				receivedQuery.Path)
 		} else {
-			receivedQuery.Path = server.Name + "-->" + receivedQuery.Path
+			//Trace back the net hop
+			sender, ok := server.NextHop(receivedQuery)
 			receivedQuery.SourceAddress = server.nodeConfig.Address
-			sender, ok := server.history.Dequeue(receivedQuery.Id)
 			if ok {
 				go server.SendQuery(receivedQuery, sender)
 			}
 		}
-	} else if server.initiatedRequests[receivedQuery.Id] {
-		server.Logger.Printf("Warning: Request id : %v loopback to original sender %v", receivedQuery.Id, server.Name)
 	}
 }
 
@@ -181,7 +203,7 @@ func (server *Server) HandleConnection(conn net.Conn) {
 	server.HandleQuery(receivedQuery)
 }
 
-func NewServer(name string, logger *log.Logger, maxConnections int) *Server {
+func NewServer(name string, logger *log.Logger) *Server {
 	nodeEntrepotPath := filepath.Join("./nodes", name, "entrepot.yaml")
 	nodeNeighborsPath := filepath.Join("./nodes", name, "/node.yaml")
 	nodeRepository := repository.Node{Path: nodeNeighborsPath}
@@ -193,8 +215,6 @@ func NewServer(name string, logger *log.Logger, maxConnections int) *Server {
 
 	return &Server{
 		Name:               name,
-		history:            Collection.NewConcurrentMapOfQueues(maxConnections),
-		initiatedRequests:  make(map[string]bool),
 		nodeConfig:         nodeConfig,
 		entrepotRepository: repository.Entrepot{Path: nodeEntrepotPath},
 		Logger:             logger,

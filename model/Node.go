@@ -7,7 +7,6 @@ type Node struct {
 }
 
 type Neighbour struct {
-	Id         int    `yaml:"id"`
-	Address    string `yaml:"address"`
-	EdgeWeight int    `yaml:"edge_weight"`
+	Id      int    `yaml:"id"`
+	Address string `yaml:"address"`
 }

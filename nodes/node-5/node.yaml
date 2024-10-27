@@ -3,8 +3,6 @@ address: "127.0.1.5"
 neighbours:
   - id: 2
     address: "127.0.1.2"
-    edge_weight: 0
   
   - id: 4
     address: "127.0.1.4"
-    edge_weight: 0
