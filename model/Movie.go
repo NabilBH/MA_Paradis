@@ -1,8 +1,8 @@
 package model
 
 type Movie struct {
-	Id     int
-	Title  string
-	Genres []string
-	Path   string
+	Id     int      `"yaml" : "id"`
+	Title  string   `yaml: "title"`
+	Genres []string `yaml: "genres"`
+	Path   string   `"yaml": "path"`
 }

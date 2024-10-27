@@ -13,16 +13,15 @@ type Entrepot struct {
 	Path string
 }
 
-func (repo *Entrepot) GetItems() ([]model.Movie, error) {
+func (repo *Entrepot) GetMovies() ([]model.Movie, error) {
 
-	data, err := os.ReadFile(repo.Path)
+	file, err := os.ReadFile(repo.Path)
 	var movies []model.Movie
 
 	if err != nil {
 		return movies, err
 	}
-
-	decoder := yaml.NewDecoder(strings.NewReader(string(data)))
+	decoder := yaml.NewDecoder(strings.NewReader(string(file)))
 
 	decoder.KnownFields(true)
 
@@ -37,7 +36,7 @@ func (repo *Entrepot) GetItems() ([]model.Movie, error) {
 
 func (repo *Entrepot) FindMoviesByTitle(title string) ([]model.Movie, error) {
 
-	movies, err := repo.GetItems()
+	movies, err := repo.GetMovies()
 	var searchResult []model.Movie
 
 	if err != nil {
@@ -46,6 +45,7 @@ func (repo *Entrepot) FindMoviesByTitle(title string) ([]model.Movie, error) {
 
 	for _, m := range movies {
 		if strings.EqualFold(m.Title, title) {
+
 			searchResult = append(searchResult, m)
 		}
 	}

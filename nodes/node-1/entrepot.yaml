@@ -1,0 +1,13 @@
+- title: "Terminator 2"
+  id: 2
+  genres:
+    - "genre1"
+    - "genre2"
+  path: "/drive/movies"
+
+- title: "Batman"
+  id: 3
+  genres:
+    - "genre1"
+    - "genre2"
+  path: "/drive/movies"
