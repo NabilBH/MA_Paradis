@@ -28,7 +28,7 @@ Un noeud est representé par la struct Services.server et encapsule :
 - Logger             : ecrit dans le fichier de log app.log
 - Name               : nom du noeud
 - entrepotRepository : responsable de l'accès au fichier d'entrepot
-- nodeConfig         : configuration du node chargé depuis le fichier node.yamé
+- nodeConfig         : configuration du node chargé depuis le fichier node.yaml
 
 Un noeud peut envoyer et recevoir des requetes représentées par la struct model.Query
 
@@ -36,7 +36,9 @@ Une requète a les propriétés suivantes :
  - Id : id unique généré en tant que uuid V4 reduisant la propabilité de collisions
  - TTL : time to live de la requete
  - Type : Requete de type recherche(type = 1), ou reponse(type =0) 
- - Data : dans le cas d'un requete a titre a rechercher, dans le cas d'un reponse l'adresse du noeud possédant le contenu 
+ - Data :
+   - dans le cas d'une requete le nom du titre a rechercher
+   - dans le cas d'une reponse l'adresse du noeud possédant le contenu 
  - Path : List de noeud representant le chemin traversé par la requete
  - SourceAddress : l'addresse du noeud emeteur de la requete
 
